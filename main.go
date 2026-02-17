@@ -7,12 +7,9 @@ import (
 	"image"
 	"image/jpeg"
 	"log"
-	"mime/multipart"
 	"net/http"
-	"net/textproto"
 	"os"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/blackjack/webcam"
@@ -50,7 +47,6 @@ func main() {
 	dev := flag.String("d", "/dev/video0", "video device to use")
 	fmtstr := flag.String("f", "", "video format to use, default first supported")
 	szstr := flag.String("s", "", "frame size to use, default largest one")
-	single := flag.Bool("m", false, "single image http mode, default mjpeg video")
 	addr := flag.String("l", ":8080", "addr to listien")
 	fps := flag.Bool("p", false, "print fps info")
 	flag.Parse()
@@ -138,11 +134,10 @@ FMT:
 		back chan struct{}      = make(chan struct{})
 	)
 	go encodeToImage(cam, back, fi, li, w, h, f)
-	if *single {
-		go httpImage(*addr, li)
-	} else {
-		go httpVideo(*addr, li)
-	}
+	go func() {
+		r := StreamRouter(li)
+		log.Fatal(http.ListenAndServe(*addr, r))
+	}()
 
 	timeout := uint32(5) //5 seconds
 	start := time.Now()
@@ -244,65 +239,4 @@ func encodeToImage(wc *webcam.Webcam, back chan struct{}, fi chan []byte, li cha
 		}
 
 	}
-}
-
-func httpImage(addr string, li chan *bytes.Buffer) {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("connect from", r.RemoteAddr, r.URL)
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-
-		//remove stale image
-		<-li
-
-		img := <-li
-
-		w.Header().Set("Content-Type", "image/jpeg")
-
-		if _, err := w.Write(img.Bytes()); err != nil {
-			log.Println(err)
-			return
-		}
-
-	})
-
-	log.Fatal(http.ListenAndServe(addr, nil))
-}
-
-func httpVideo(addr string, li chan *bytes.Buffer) {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("connect from", r.RemoteAddr, r.URL)
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-
-		//remove stale image
-		<-li
-		const boundary = `frame`
-		w.Header().Set("Content-Type", `multipart/x-mixed-replace;boundary=`+boundary)
-		multipartWriter := multipart.NewWriter(w)
-		multipartWriter.SetBoundary(boundary)
-		for {
-			img := <-li
-			image := img.Bytes()
-			iw, err := multipartWriter.CreatePart(textproto.MIMEHeader{
-				"Content-type":   []string{"image/jpeg"},
-				"Content-length": []string{strconv.Itoa(len(image))},
-			})
-			if err != nil {
-				log.Println(err)
-				return
-			}
-			_, err = iw.Write(image)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-		}
-	})
-
-	log.Fatal(http.ListenAndServe(addr, nil))
 }
