@@ -167,7 +167,7 @@ FMT:
 		}
 		if len(frame) != 0 {
 
-			// print framerate info every 10 seconds
+			// print framerate info every 10 second
 			fr++
 			if *fps {
 				if d := time.Since(start); d > time.Second*10 {
